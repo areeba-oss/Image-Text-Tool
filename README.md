@@ -1,0 +1,216 @@
+# Monday Motivation - Dynamic Text Renderer
+
+## Setup (one time only)
+
+```
+pip install -r requirements.txt
+```
+
+## API mode (FastAPI)
+
+Run API server:
+
+```bash
+uvicorn api:app --reload --host 0.0.0.0 --port 8000
+```
+
+Endpoint:
+
+- `POST /render-text-monday-motivation`
+- `POST /render-text-review`
+- `POST /render-text-funfact`
+- `POST /render-text` (alias for Monday motivation)
+- `GET /health`
+- `GET /registry`
+- `GET /image-info?image=...`
+
+### How to choose `start_xy`
+
+- Coordinates are in pixels by default (`start_xy_mode: "px"`).
+- `x` grows left to right, `y` grows top to bottom.
+- Use `align` to decide what `x` means:
+    - `left`: text starts at `x`
+    - `center`: `x` is center anchor
+    - `right`: `x` is right edge anchor
+
+To avoid guessing, call:
+
+```bash
+curl "http://localhost:8000/image-info?image=post"
+```
+
+It returns image width/height and sample pixel anchors.
+
+To see allowed image/font keys from backend registry:
+
+```bash
+curl "http://localhost:8000/registry"
+```
+
+You can also use percentage mode for responsive placement:
+
+- `start_xy_mode: "percent"`
+- `start_xy: [50, 20]` means 50% width, 20% height
+
+Example request body:
+
+```json
+{
+    "image": "post",
+    "output_path": "output/post_api_output.jpg",
+    "lines": [
+        { "text": "Mondays may not ", "bold": false, "font_size": 42, "color": "#1E1E1E" },
+        {
+            "text": "SMELL",
+            "bold": true,
+            "highlighted": true,
+            "font_size": 42,
+            "color_codes": ["#1E1E1E", "#1E1E1E"],
+            "highlight_text_color": "#FFFFFF"
+        },
+        { "text": " nice", "bold": false, "font_size": 42, "color": "#1E1E1E" }
+    ],
+    "start_xy": [540, 220],
+    "start_xy_mode": "px",
+    "text_box": {
+        "width": 900,
+        "height": 360
+    },
+    "fonts": {
+        "regular": "Poppins-Regular",
+        "bold": "Poppins-Bold"
+    },
+    "default_font_size": 36,
+    "line_height": 56,
+    "default_color": "#111111",
+    "default_highlight_text_color": "#FFFFFF",
+    "default_highlight_colors": ["#FF6B00", "#F54800"],
+    "highlight_padding": [10, 6],
+    "highlight_radius": 10,
+    "align": "center"
+}
+```
+
+Review endpoint example:
+
+```json
+{
+    "image_path": "final post .jpg",
+    "output_path": "post_review_output",
+    "review_text": "This is a great product. It is clean, fast, and easy to use.",
+    "review_text_xy": [5, 35],
+    "reviewer_name": "Areeba",
+    "reviewer_name_xy": [5, 75],
+    "start_xy_mode": "percent",
+    "review_text_box": {
+        "width": 900,
+        "height": 300
+    },
+    "reviewer_name_box": {
+        "width": 500,
+        "height": 80
+    },
+    "review_text_align": "center",
+    "reviewer_name_align": "left",
+    "fonts": {
+        "regular": "Poppins-Regular.ttf",
+        "bold": "Poppins-Bold.ttf"
+    },
+    "review_text_font_size": 54,
+    "reviewer_name_font_size": 36,
+    "review_text_font_color": "#1E1E1E",
+    "reviewer_name_font_color": "#1E1E1E"
+}
+```
+
+Funfact endpoint example:
+
+```json
+{
+    "image_path": "Chic-Testimonial.jpg",
+    "output_path": "post_funfact_output",
+    "funfact_text": "Fun Fact: Consistency beats intensity when you are building habits.",
+    "funfact_xy": [15, 43],
+    "funfact_box": {
+        "width": 775,
+        "height": 300
+    },
+    "funfact_align": "center",
+    "funfact_font_color": "#FFFFFF",
+    "funfact_font_size": 40,
+    "start_xy_mode": "percent",
+    "fonts": {
+        "regular": "PlayfairDisplay-Regular.ttf",
+        "bold": "PLAYFAIRDISPLAY-BLACK.ttf"
+    }
+}
+```
+
+PowerShell example:
+
+```powershell
+$body = @'
+{
+    "image": "post",
+    "output_path": "output/post_api_output.jpg",
+    "lines": [{"text":"Hello ","bold":false},{"text":"WORLD","bold":true,"highlighted":true,"color_codes":["#FF7A00","#D64E00"]}],
+    "start_xy": [50, 20],
+    "start_xy_mode": "percent",
+    "fonts": {"regular":"Poppins-Regular","bold":"Poppins-Bold"},
+    "align": "center"
+}
+'@
+
+Invoke-RestMethod -Uri "http://localhost:8000/render-text" -Method Post -ContentType "application/json" -Body $body
+```
+
+## Usage
+
+1. Drop your image into the `images/` folder (PNG or JPG)
+2. Open `replace_text.py` and edit `text_blocks` plus the `add_dynamic_text(...)` call
+3. Run:
+
+```
+python replace_text.py
+```
+
+4. Find the result in the  `output/`  folder
+
+## Data format (flat array of objects)
+
+```python
+text_blocks = [
+    {"text": "Your normal text ", "bold": False, "color": "#1E1E1E", "font_size": 36},
+    {
+        "text": "HIGHLIGHT",
+        "bold": True,
+        "highlighted": True,
+        "font_size": 36,
+        "color_codes": ["#FF7A00", "#D64E00"],
+        "highlight_text_color": "#FFFFFF"
+    },
+    {"text": "Second part...", "bold": False, "color": "#222222", "font_size": 30},
+]
+```
+
+- If `text_box` is provided, the renderer wraps text inside the box and stops when height is exhausted.
+- If `text_box` is omitted, the renderer keeps the old one-line continuous behavior.
+- The review endpoint accepts plain strings only, with separate x/y positions, font sizes, and font colors for review text and reviewer name.
+- The funfact endpoint accepts a single plain string with its own text box, x/y, alignment, font size, and font color.
+- `text`: required text segment.
+- `bold`: chooses bold font file (`fonts['bold']`).
+- `highlighted`: if `True`, draws a rounded highlight behind text.
+- `color`: text color hex for non-highlighted text.
+- `font_size`: optional size override per segment.
+- `color_codes`: hex array for highlighted background. One value gives solid color, multiple values create left-to-right gradient.
+- `highlight_text_color`: optional text color for highlighted segment.
+
+## Function signature
+
+`add_dynamic_text(image_path, output_path, lines, start_xy, fonts, ...)`
+
+- `fonts` must include:
+  - `regular`: path to regular `.ttf`
+  - `bold`: path to bold `.ttf`
+- Supports `align="left" | "center" | "right"`.
+- Supports global controls like `line_height`, `highlight_padding`, `highlight_radius`, and default colors.
