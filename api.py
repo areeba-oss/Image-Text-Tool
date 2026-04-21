@@ -3,6 +3,8 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import AliasChoices, BaseModel, Field
 
@@ -12,6 +14,14 @@ app = FastAPI(title="Dynamic Text Renderer API", version="1.0.0")
 
 FONTS_DIR = BASE_DIR / "fonts"
 IMAGES_DIR = BASE_DIR / "images"
+OUTPUT_DIR = BASE_DIR / "output"
+ALLOWED_IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp")
+
+IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+app.mount("/media/images", StaticFiles(directory=str(IMAGES_DIR)), name="media-images")
+app.mount("/media/output", StaticFiles(directory=str(OUTPUT_DIR)), name="media-output")
 
 
 def _build_font_registry() -> dict[str, Path]:
@@ -31,8 +41,17 @@ def _build_font_registry() -> dict[str, Path]:
 
 def _build_image_registry() -> dict[str, Path]:
     registry: dict[str, Path] = {}
-    for pattern in ("*.png", "*.jpg", "*.jpeg", "*.webp"):
-        for file_path in IMAGES_DIR.glob(pattern):
+    for pattern in ALLOWED_IMAGE_SUFFIXES:
+        glob_pattern = f"*{pattern}"
+        for file_path in IMAGES_DIR.glob(glob_pattern):
+            file_name = file_path.name
+            stem = file_path.stem
+            registry[file_name] = file_path
+            registry[file_name.lower()] = file_path
+            registry[stem] = file_path
+            registry[stem.lower()] = file_path
+
+        for file_path in BASE_DIR.glob(glob_pattern):
             file_name = file_path.name
             stem = file_path.stem
             registry[file_name] = file_path
@@ -40,6 +59,17 @@ def _build_image_registry() -> dict[str, Path]:
             registry[stem] = file_path
             registry[stem.lower()] = file_path
     return registry
+
+
+def _resolve_root_image_for_serving(file_name: str) -> Path:
+    candidate = (BASE_DIR / file_name).resolve()
+    if candidate.parent != BASE_DIR.resolve():
+        raise HTTPException(status_code=400, detail="Invalid file path")
+    if candidate.suffix.lower() not in ALLOWED_IMAGE_SUFFIXES:
+        raise HTTPException(status_code=400, detail="Only image files are allowed")
+    if not candidate.exists() or not candidate.is_file():
+        raise HTTPException(status_code=404, detail="Image not found")
+    return candidate
 
 
 FONT_REGISTRY = _build_font_registry()
@@ -277,6 +307,11 @@ def image_info(image: str = Query(..., description="Image key from backend regis
             "bottom_center": (width // 2, int(height * 0.85)),
         },
     )
+
+
+@app.get("/media/root-images/{file_name}")
+def root_images(file_name: str) -> FileResponse:
+    return FileResponse(_resolve_root_image_for_serving(file_name))
 
 
 def _resolve_point(width: int, height: int, point: tuple[float, float], mode: str) -> tuple[int, int]:

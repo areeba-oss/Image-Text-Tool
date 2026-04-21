@@ -23,6 +23,19 @@ Endpoint:
 - `GET /health`
 - `GET /registry`
 - `GET /image-info?image=...`
+- `GET /media/images/{file_name}` (read source images)
+- `GET /media/output/{file_name}` (read rendered outputs)
+- `GET /media/root-images/{file_name}` (read images stored next to code files)
+
+### Fetch image files via API
+
+Examples:
+
+```bash
+curl "http://localhost:8000/media/images/post.jpg" --output post.jpg
+curl "http://localhost:8000/media/output/post_api_output.jpg" --output rendered.jpg
+curl "http://localhost:8000/media/root-images/SPC-Fun.jpg" --output root_image.jpg
+```
 
 ### How to choose `start_xy`
 
