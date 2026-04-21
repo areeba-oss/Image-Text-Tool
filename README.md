@@ -87,7 +87,12 @@ Example request body:
     "default_highlight_colors": ["#FF6B00", "#F54800"],
     "highlight_padding": [10, 6],
     "highlight_radius": 10,
-    "align": "center"
+    "align": "center",
+    "auto_fit": true,
+    "auto_fit_min_font_size": 28,
+    "auto_fit_max_font_size": 96,
+    "auto_fit_line_height_ratio": 1.25,
+    "auto_fit_step": 1
 }
 ```
 
@@ -97,12 +102,12 @@ Review endpoint example:
 {
     "image_path": "final post .jpg",
     "output_path": "post_review_output",
-    "review_text": "This is a great product. It is clean, fast, and easy to use.",
-    "review_text_xy": [5, 35],
+    "text": "This is a great product. It is clean, fast, and easy to use.",
+    "start_xy": [5, 35],
     "reviewer_name": "Areeba",
     "reviewer_name_xy": [5, 75],
     "start_xy_mode": "percent",
-    "review_text_box": {
+    "text_box": {
         "width": 900,
         "height": 300
     },
@@ -110,15 +115,16 @@ Review endpoint example:
         "width": 500,
         "height": 80
     },
-    "review_text_align": "center",
+    "align": "center",
     "reviewer_name_align": "left",
     "fonts": {
         "regular": "Poppins-Regular.ttf",
         "bold": "Poppins-Bold.ttf"
     },
-    "review_text_font_size": 54,
+    "font_size": 54,
+    "line_height": 66,
     "reviewer_name_font_size": 36,
-    "review_text_font_color": "#1E1E1E",
+    "font_color": "#1E1E1E",
     "reviewer_name_font_color": "#1E1E1E"
 }
 ```
@@ -129,15 +135,16 @@ Funfact endpoint example:
 {
     "image_path": "Chic-Testimonial.jpg",
     "output_path": "post_funfact_output",
-    "funfact_text": "Fun Fact: Consistency beats intensity when you are building habits.",
-    "funfact_xy": [15, 43],
-    "funfact_box": {
+    "text": "Fun Fact: Consistency beats intensity when you are building habits.",
+    "start_xy": [15, 43],
+    "text_box": {
         "width": 775,
         "height": 300
     },
-    "funfact_align": "center",
-    "funfact_font_color": "#FFFFFF",
-    "funfact_font_size": 40,
+    "align": "center",
+    "font_color": "#FFFFFF",
+    "font_size": 40,
+    "line_height": 52,
     "start_xy_mode": "percent",
     "fonts": {
         "regular": "PlayfairDisplay-Regular.ttf",
@@ -195,8 +202,15 @@ text_blocks = [
 
 - If `text_box` is provided, the renderer wraps text inside the box and stops when height is exhausted.
 - If `text_box` is omitted, the renderer keeps the old one-line continuous behavior.
-- The review endpoint accepts plain strings only, with separate x/y positions, font sizes, and font colors for review text and reviewer name.
-- The funfact endpoint accepts a single plain string with its own text box, x/y, alignment, font size, and font color.
+- The review and funfact endpoints now support unified keys: `text`, `start_xy`, `text_box`, `align`, `font_size`, `line_height`, `font_color`.
+- Backward compatibility is kept: old keys like `review_text_*` and `funfact_*` still work.
+- The review endpoint still supports reviewer-specific controls (`reviewer_name`, `reviewer_name_xy`, `reviewer_name_box`, `reviewer_name_align`, `reviewer_name_font_size`, `reviewer_name_font_color`).
+- Auto-fitting is supported on all 3 render endpoints when `text_box` is provided:
+    - `auto_fit`: enable/disable automatic resize
+    - `auto_fit_min_font_size`: lower bound for shrink
+    - `auto_fit_max_font_size`: upper bound for grow (if omitted, renderer auto-picks a reasonable max)
+    - `auto_fit_line_height_ratio`: line-height scale factor relative to selected font size
+    - `auto_fit_step`: search step (1 gives best precision)
 - `text`: required text segment.
 - `bold`: chooses bold font file (`fonts['bold']`).
 - `highlighted`: if `True`, draws a rounded highlight behind text.

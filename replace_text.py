@@ -208,6 +208,32 @@ def _build_wrapped_lines(
     return wrapped_lines
 
 
+def _get_base_font_size(lines: list[dict[str, Any]], fallback_size: int) -> int:
+    sizes: list[int] = []
+    for segment in lines:
+        value = segment.get("font_size")
+        if value is None:
+            continue
+        sizes.append(int(value))
+    if not sizes:
+        return max(1, int(fallback_size))
+    return max(1, int(round(sum(sizes) / len(sizes))))
+
+
+def _scale_lines_font_size(lines: list[dict[str, Any]], target_size: int, base_size: int) -> list[dict[str, Any]]:
+    safe_base = max(1, int(base_size))
+    safe_target = max(1, int(target_size))
+    scaled: list[dict[str, Any]] = []
+
+    for segment in lines:
+        next_segment = dict(segment)
+        source_size = int(segment.get("font_size", safe_base))
+        next_segment["font_size"] = max(1, int(round(source_size * (safe_target / safe_base))))
+        scaled.append(next_segment)
+
+    return scaled
+
+
 def render_dynamic_text(
     image: Image.Image,
     lines: list[dict[str, Any]],
@@ -222,6 +248,11 @@ def render_dynamic_text(
     highlight_padding: tuple[int, int] = (8, 4),
     highlight_radius: int = 8,
     align: str = "left",
+    auto_fit: bool = False,
+    auto_fit_min_font_size: int = 18,
+    auto_fit_max_font_size: int | None = None,
+    auto_fit_line_height_ratio: float | None = None,
+    auto_fit_step: int = 1,
 ) -> Image.Image:
     if default_highlight_colors is None:
         default_highlight_colors = ["#FF7A00"]
@@ -240,7 +271,46 @@ def render_dynamic_text(
         box_height = int(text_box.get("height", 0))
         if box_width <= 0 or box_height <= 0:
             raise ValueError("text_box width and height must be greater than 0")
-        render_lines = _build_wrapped_lines(draw, lines, fonts, default_font_size, box_width)
+        effective_lines = lines
+        effective_default_font_size = default_font_size
+        effective_line_height = line_height
+
+        if auto_fit:
+            base_size = _get_base_font_size(lines, default_font_size)
+            min_size = max(1, int(auto_fit_min_font_size))
+            computed_max = max(base_size * 2, base_size)
+            max_size = max(min_size, int(auto_fit_max_font_size or computed_max))
+            step = max(1, int(auto_fit_step))
+            line_height_ratio = (
+                float(auto_fit_line_height_ratio)
+                if auto_fit_line_height_ratio is not None
+                else float(line_height) / float(max(base_size, 1))
+            )
+
+            best_lines: list[dict[str, Any]] | None = None
+            best_wrapped: list[list[dict[str, Any]]] | None = None
+            best_target_size: int | None = None
+
+            for target_size in range(max_size, min_size - 1, -step):
+                candidate_lines = _scale_lines_font_size(lines, target_size, base_size)
+                wrapped = _build_wrapped_lines(draw, candidate_lines, fonts, target_size, box_width)
+                candidate_line_height = max(1, int(round(target_size * line_height_ratio)))
+
+                if wrapped and (len(wrapped) * candidate_line_height) <= box_height:
+                    best_lines = candidate_lines
+                    best_wrapped = wrapped
+                    best_target_size = target_size
+                    break
+
+            if best_lines is not None and best_wrapped is not None and best_target_size is not None:
+                effective_lines = best_lines
+                effective_default_font_size = best_target_size
+                effective_line_height = max(1, int(round(best_target_size * line_height_ratio)))
+
+        render_lines = _build_wrapped_lines(draw, effective_lines, fonts, effective_default_font_size, box_width)
+        lines = effective_lines
+        default_font_size = effective_default_font_size
+        line_height = effective_line_height
     else:
         render_lines = [lines]
 
@@ -323,6 +393,11 @@ def add_dynamic_text(
     highlight_padding: tuple[int, int] = (8, 4),
     highlight_radius: int = 8,
     align: str = "left",
+    auto_fit: bool = False,
+    auto_fit_min_font_size: int = 18,
+    auto_fit_max_font_size: int | None = None,
+    auto_fit_line_height_ratio: float | None = None,
+    auto_fit_step: int = 1,
 ) -> None:
     image = Image.open(image_path)
     rendered_image = render_dynamic_text(
@@ -339,6 +414,11 @@ def add_dynamic_text(
         highlight_padding=highlight_padding,
         highlight_radius=highlight_radius,
         align=align,
+        auto_fit=auto_fit,
+        auto_fit_min_font_size=auto_fit_min_font_size,
+        auto_fit_max_font_size=auto_fit_max_font_size,
+        auto_fit_line_height_ratio=auto_fit_line_height_ratio,
+        auto_fit_step=auto_fit_step,
     )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)

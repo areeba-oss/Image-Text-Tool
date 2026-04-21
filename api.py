@@ -81,6 +81,11 @@ class RenderRequest(BaseModel):
     highlight_padding: tuple[int, int] = (8, 4)
     highlight_radius: int = 8
     align: Literal["left", "center", "right"] = "left"
+    auto_fit: bool = False
+    auto_fit_min_font_size: int = 18
+    auto_fit_max_font_size: int | None = None
+    auto_fit_line_height_ratio: float | None = None
+    auto_fit_step: int = 1
 
 
 class ReviewRequest(BaseModel):
@@ -90,24 +95,38 @@ class ReviewRequest(BaseModel):
         validation_alias=AliasChoices("image", "image_path"),
     )
     output_path: str | None = Field(None, description="Optional output path")
-    review_text: str
-    review_text_xy: tuple[float, float]
+    text: str = Field(..., validation_alias=AliasChoices("text", "review_text"))
+    start_xy: tuple[float, float] = Field(
+        ...,
+        validation_alias=AliasChoices("start_xy", "review_text_xy"),
+    )
     reviewer_name: str | None = None
     reviewer_name_xy: tuple[float, float] | None = None
     start_xy_mode: Literal["px", "percent"] = "px"
-    review_text_box: TextBoxModel | None = Field(None, description="Optional fixed box for review text")
+    text_box: TextBoxModel | None = Field(
+        None,
+        description="Optional fixed box for main review text",
+        validation_alias=AliasChoices("text_box", "review_text_box"),
+    )
     reviewer_name_box: TextBoxModel | None = Field(None, description="Optional fixed box for reviewer name")
-    review_text_align: Literal["left", "center", "right"] = Field(
+    align: Literal["left", "center", "right"] = Field(
         "left",
-        validation_alias=AliasChoices("review_text_align", "align"),
+        validation_alias=AliasChoices("align", "review_text_align"),
     )
     reviewer_name_align: Literal["left", "center", "right"] = "left"
     fonts: dict[str, str]
-    review_text_font_size: int = 32
+    font_size: int = Field(
+        32,
+        validation_alias=AliasChoices("font_size", "review_text_font_size"),
+    )
+    line_height: int | None = Field(
+        None,
+        validation_alias=AliasChoices("line_height", "review_text_line_height"),
+    )
     reviewer_name_font_size: int = 28
-    review_text_font_color: str = Field(
+    font_color: str = Field(
         "#1E1E1E",
-        validation_alias=AliasChoices("review_text_font_color", "review_text_color"),
+        validation_alias=AliasChoices("font_color", "review_text_font_color", "review_text_color"),
     )
     reviewer_name_font_color: str = Field(
         "#1E1E1E",
@@ -116,6 +135,11 @@ class ReviewRequest(BaseModel):
     default_highlight_colors: list[str] | None = None
     highlight_padding: tuple[int, int] = (8, 4)
     highlight_radius: int = 8
+    auto_fit: bool = False
+    auto_fit_min_font_size: int = 18
+    auto_fit_max_font_size: int | None = None
+    auto_fit_line_height_ratio: float | None = None
+    auto_fit_step: int = 1
 
 
 class FunFactRequest(BaseModel):
@@ -125,23 +149,41 @@ class FunFactRequest(BaseModel):
         validation_alias=AliasChoices("image", "image_path"),
     )
     output_path: str | None = Field(None, description="Optional output path")
-    funfact_text: str
-    funfact_xy: tuple[float, float]
+    text: str = Field(..., validation_alias=AliasChoices("text", "funfact_text"))
+    start_xy: tuple[float, float] = Field(
+        ...,
+        validation_alias=AliasChoices("start_xy", "funfact_xy"),
+    )
     start_xy_mode: Literal["px", "percent"] = "px"
-    funfact_box: TextBoxModel
-    funfact_align: Literal["left", "center", "right"] = Field(
+    text_box: TextBoxModel = Field(
+        ...,
+        validation_alias=AliasChoices("text_box", "funfact_box"),
+    )
+    align: Literal["left", "center", "right"] = Field(
         "left",
-        validation_alias=AliasChoices("funfact_align", "align"),
+        validation_alias=AliasChoices("align", "funfact_align"),
     )
     fonts: dict[str, str]
-    funfact_font_size: int = 32
-    funfact_font_color: str = Field(
+    font_size: int = Field(
+        32,
+        validation_alias=AliasChoices("font_size", "funfact_font_size"),
+    )
+    line_height: int | None = Field(
+        None,
+        validation_alias=AliasChoices("line_height", "funfact_line_height"),
+    )
+    font_color: str = Field(
         "#1E1E1E",
-        validation_alias=AliasChoices("funfact_font_color", "funfact_color"),
+        validation_alias=AliasChoices("font_color", "funfact_font_color", "funfact_color"),
     )
     default_highlight_colors: list[str] | None = None
     highlight_padding: tuple[int, int] = (8, 4)
     highlight_radius: int = 8
+    auto_fit: bool = False
+    auto_fit_min_font_size: int = 18
+    auto_fit_max_font_size: int | None = None
+    auto_fit_line_height_ratio: float | None = None
+    auto_fit_step: int = 1
 
 
 class RenderResponse(BaseModel):
@@ -261,6 +303,11 @@ def _render_segments(
     highlight_padding: tuple[int, int],
     highlight_radius: int,
     align: str,
+    auto_fit: bool,
+    auto_fit_min_font_size: int,
+    auto_fit_max_font_size: int | None,
+    auto_fit_line_height_ratio: float | None,
+    auto_fit_step: int,
 ) -> None:
     with Image.open(image_path) as image:
         rendered_image = render_dynamic_text(
@@ -277,6 +324,11 @@ def _render_segments(
             highlight_padding=highlight_padding,
             highlight_radius=highlight_radius,
             align=align,
+            auto_fit=auto_fit,
+            auto_fit_min_font_size=auto_fit_min_font_size,
+            auto_fit_max_font_size=auto_fit_max_font_size,
+            auto_fit_line_height_ratio=auto_fit_line_height_ratio,
+            auto_fit_step=auto_fit_step,
         )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -329,6 +381,11 @@ def render_text(payload: RenderRequest) -> RenderResponse:
             highlight_padding=payload.highlight_padding,
             highlight_radius=payload.highlight_radius,
             align=payload.align,
+            auto_fit=payload.auto_fit,
+            auto_fit_min_font_size=payload.auto_fit_min_font_size,
+            auto_fit_max_font_size=payload.auto_fit_max_font_size,
+            auto_fit_line_height_ratio=payload.auto_fit_line_height_ratio,
+            auto_fit_step=payload.auto_fit_step,
         )
 
         return RenderResponse(
@@ -351,22 +408,28 @@ def render_text_review(payload: ReviewRequest) -> RenderResponse:
         with Image.open(image_path) as image:
             width, height = image.size
 
-            review_text_xy = _resolve_point(width, height, payload.review_text_xy, payload.start_xy_mode)
+            review_text_xy = _resolve_point(width, height, payload.start_xy, payload.start_xy_mode)
             resolved_fonts = {key: _resolve_font_key(value) for key, value in payload.fonts.items()}
+            review_line_height = payload.line_height or (payload.font_size + 12)
             rendered_image = render_dynamic_text(
                 image=image,
-                lines=[_build_plain_segment(payload.review_text, payload.review_text_font_color, payload.review_text_font_size)],
+                lines=[_build_plain_segment(payload.text, payload.font_color, payload.font_size)],
                 start_xy=review_text_xy,
-                text_box=(payload.review_text_box.model_dump() if payload.review_text_box else None),
+                text_box=(payload.text_box.model_dump() if payload.text_box else None),
                 fonts=resolved_fonts,
-                default_font_size=payload.review_text_font_size,
-                line_height=payload.review_text_font_size + 12,
-                default_color=payload.review_text_font_color,
-                default_highlight_text_color=payload.review_text_font_color,
+                default_font_size=payload.font_size,
+                line_height=review_line_height,
+                default_color=payload.font_color,
+                default_highlight_text_color=payload.font_color,
                 default_highlight_colors=payload.default_highlight_colors,
                 highlight_padding=payload.highlight_padding,
                 highlight_radius=payload.highlight_radius,
-                align=payload.review_text_align,
+                align=payload.align,
+                auto_fit=payload.auto_fit,
+                auto_fit_min_font_size=payload.auto_fit_min_font_size,
+                auto_fit_max_font_size=payload.auto_fit_max_font_size,
+                auto_fit_line_height_ratio=payload.auto_fit_line_height_ratio,
+                auto_fit_step=payload.auto_fit_step,
             )
 
             if payload.reviewer_name and payload.reviewer_name.strip():
@@ -418,22 +481,28 @@ def render_text_funfact(payload: FunFactRequest) -> RenderResponse:
         with Image.open(image_path) as image:
             width, height = image.size
 
-            funfact_xy = _resolve_point(width, height, payload.funfact_xy, payload.start_xy_mode)
+            funfact_xy = _resolve_point(width, height, payload.start_xy, payload.start_xy_mode)
             resolved_fonts = {key: _resolve_font_key(value) for key, value in payload.fonts.items()}
+            funfact_line_height = payload.line_height or (payload.font_size + 12)
             rendered_image = render_dynamic_text(
                 image=image,
-                lines=[_build_plain_segment(payload.funfact_text, payload.funfact_font_color, payload.funfact_font_size)],
+                lines=[_build_plain_segment(payload.text, payload.font_color, payload.font_size)],
                 start_xy=funfact_xy,
-                text_box=payload.funfact_box.model_dump(),
+                text_box=payload.text_box.model_dump(),
                 fonts=resolved_fonts,
-                default_font_size=payload.funfact_font_size,
-                line_height=payload.funfact_font_size + 12,
-                default_color=payload.funfact_font_color,
-                default_highlight_text_color=payload.funfact_font_color,
+                default_font_size=payload.font_size,
+                line_height=funfact_line_height,
+                default_color=payload.font_color,
+                default_highlight_text_color=payload.font_color,
                 default_highlight_colors=payload.default_highlight_colors,
                 highlight_padding=payload.highlight_padding,
                 highlight_radius=payload.highlight_radius,
-                align=payload.funfact_align,
+                align=payload.align,
+                auto_fit=payload.auto_fit,
+                auto_fit_min_font_size=payload.auto_fit_min_font_size,
+                auto_fit_max_font_size=payload.auto_fit_max_font_size,
+                auto_fit_line_height_ratio=payload.auto_fit_line_height_ratio,
+                auto_fit_step=payload.auto_fit_step,
             )
 
         output_path = (
