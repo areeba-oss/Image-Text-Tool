@@ -145,6 +145,7 @@ class ReviewRequest(BaseModel):
     )
     reviewer_name_align: Literal["left", "center", "right"] = "left"
     fonts: dict[str, str]
+    emoji_font: str | None = Field(None, description="Optional emoji font key for both review text and reviewer name")
     font_size: int = Field(
         32,
         validation_alias=AliasChoices("font_size", "review_text_font_size"),
@@ -154,6 +155,9 @@ class ReviewRequest(BaseModel):
         validation_alias=AliasChoices("line_height", "review_text_line_height"),
     )
     reviewer_name_font_size: int = 28
+    reviewer_name_bold: bool = False
+    reviewer_name_italic: bool = False
+    reviewer_name_underline: bool = False
     font_color: str = Field(
         "#1E1E1E",
         validation_alias=AliasChoices("font_color", "review_text_font_color", "review_text_color"),
@@ -194,6 +198,7 @@ class FunFactRequest(BaseModel):
         validation_alias=AliasChoices("align", "funfact_align"),
     )
     fonts: dict[str, str]
+    emoji_font: str | None = Field(None, description="Optional emoji font key (e.g., 'NotoColorEmoji')")
     font_size: int = Field(
         32,
         validation_alias=AliasChoices("font_size", "funfact_font_size"),
@@ -260,6 +265,34 @@ def _resolve_font_key(font_key: str) -> Path:
     return matched
 
 
+def _resolve_emoji_font_path(emoji_font: str | None) -> Path | None:
+    windows_emoji_candidates = [
+        Path(r"C:\Windows\Fonts\seguiemj.ttf"),
+        Path(r"C:\Windows\Fonts\SegoeUIEmoji.ttf"),
+    ]
+
+    for candidate in windows_emoji_candidates:
+        if candidate.exists():
+            return candidate
+
+    if emoji_font:
+        requested = emoji_font.strip()
+        requested_lower = requested.lower()
+
+        try:
+            return _resolve_font_key(requested)
+        except HTTPException:
+            requested_path = _resolve_path(requested)
+            if requested_path.exists():
+                return requested_path
+
+    bundled_emoji_font = BASE_DIR / "fonts" / "NotoColorEmoji.ttf"
+    if bundled_emoji_font.exists():
+        return bundled_emoji_font
+
+    return None
+
+
 def _resolve_image_key(image_key: str) -> Path:
     global IMAGE_REGISTRY
     image_key = image_key.strip()
@@ -314,13 +347,33 @@ def root_images(file_name: str) -> FileResponse:
     return FileResponse(_resolve_root_image_for_serving(file_name))
 
 
-def _resolve_point(width: int, height: int, point: tuple[float, float], mode: str) -> tuple[int, int]:
+def _resolve_point(width: int, height: int, point: tuple[float, float], mode: str, allow_negative: bool = False) -> tuple[int, int]:
+    px, py = point
     if mode == "percent":
-        px, py = point
-        if px < 0 or px > 100 or py < 0 or py > 100:
-            raise HTTPException(status_code=400, detail="Percent coordinates expect values between 0 and 100")
-        return int(width * (px / 100.0)), int(height * (py / 100.0))
-    return int(point[0]), int(point[1])
+        # allow_negative controls whether negative percent values are interpreted
+        # as offsets from the right/bottom edges. Positive values are from left/top.
+        min_val, max_val = (-100 if allow_negative else 0), 100
+        if px < min_val or px > max_val or py < min_val or py > max_val:
+            raise HTTPException(status_code=400, detail="Percent coordinates expect values between 0 and 100 (or -100 to 100 when negatives are allowed)")
+
+        if px >= 0:
+            x = int(width * (px / 100.0))
+        else:
+            x = int(width - (width * (abs(px) / 100.0)))
+
+        if py >= 0:
+            y = int(height * (py / 100.0))
+        else:
+            y = int(height - (height * (abs(py) / 100.0)))
+
+        return x, y
+
+    # pixel mode: allow_negative means negative values count from right/bottom
+    if not allow_negative:
+        return int(px), int(py)
+    x = int(px) if px >= 0 else int(width + px)
+    y = int(py) if py >= 0 else int(height + py)
+    return x, y
 
 
 def _render_segments(
@@ -370,10 +423,19 @@ def _render_segments(
     rendered_image.convert("RGB").save(output_path)
 
 
-def _build_plain_segment(text: str, color: str, font_size: int, bold: bool = False) -> dict[str, object]:
+def _build_plain_segment(
+    text: str,
+    color: str,
+    font_size: int,
+    bold: bool = False,
+    italic: bool = False,
+    underline: bool = False,
+) -> dict[str, object]:
     return {
         "text": text,
         "bold": bold,
+        "italic": italic,
+        "underline": underline,
         "font_size": font_size,
         "color": color,
     }
@@ -445,6 +507,10 @@ def render_text_review(payload: ReviewRequest) -> RenderResponse:
 
             review_text_xy = _resolve_point(width, height, payload.start_xy, payload.start_xy_mode)
             resolved_fonts = {key: _resolve_font_key(value) for key, value in payload.fonts.items()}
+            emoji_font_path = _resolve_emoji_font_path(payload.emoji_font)
+            if emoji_font_path is not None:
+                resolved_fonts["emoji"] = emoji_font_path
+            
             review_line_height = payload.line_height or (payload.font_size + 12)
             rendered_image = render_dynamic_text(
                 image=image,
@@ -471,10 +537,17 @@ def render_text_review(payload: ReviewRequest) -> RenderResponse:
                 if payload.reviewer_name_xy is None:
                     raise HTTPException(status_code=400, detail="reviewer_name_xy is required when reviewer_name is provided")
 
-                reviewer_name_xy = _resolve_point(width, height, payload.reviewer_name_xy, payload.start_xy_mode)
+                reviewer_name_xy = _resolve_point(width, height, payload.reviewer_name_xy, payload.start_xy_mode, allow_negative=True)
                 rendered_image = render_dynamic_text(
                     image=rendered_image,
-                    lines=[_build_plain_segment(payload.reviewer_name, payload.reviewer_name_font_color, payload.reviewer_name_font_size)],
+                    lines=[_build_plain_segment(
+                        payload.reviewer_name,
+                        payload.reviewer_name_font_color,
+                        payload.reviewer_name_font_size,
+                        payload.reviewer_name_bold,
+                        payload.reviewer_name_italic,
+                        payload.reviewer_name_underline,
+                    )],
                     start_xy=reviewer_name_xy,
                     text_box=(payload.reviewer_name_box.model_dump() if payload.reviewer_name_box else None),
                     fonts=resolved_fonts,
@@ -518,6 +591,10 @@ def render_text_funfact(payload: FunFactRequest) -> RenderResponse:
 
             funfact_xy = _resolve_point(width, height, payload.start_xy, payload.start_xy_mode)
             resolved_fonts = {key: _resolve_font_key(value) for key, value in payload.fonts.items()}
+            emoji_font_path = _resolve_emoji_font_path(payload.emoji_font)
+            if emoji_font_path is not None:
+                resolved_fonts["emoji"] = emoji_font_path
+            
             funfact_line_height = payload.line_height or (payload.font_size + 12)
             rendered_image = render_dynamic_text(
                 image=image,

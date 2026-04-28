@@ -1,10 +1,164 @@
 from pathlib import Path
 from typing import Any
 import re
+import unicodedata
 
 from PIL import Image, ImageDraw, ImageFont
 
 BASE_DIR = Path(__file__).resolve().parent
+EMOJI_FONT_SCALE = 0.94
+EMOJI_BASELINE_SHIFT = -2
+
+
+def _is_emoji(char: str) -> bool:
+    """Check if character is an emoji."""
+    return unicodedata.category(char) in ('So', 'Sk', 'Sm')
+
+
+def _contains_emoji(text: str) -> bool:
+    """Check if text contains any emoji characters."""
+    return any(_is_emoji(char) for char in text)
+
+
+def _iter_text_runs(text: str) -> list[tuple[str, bool]]:
+    runs: list[tuple[str, bool]] = []
+    current = ""
+    current_is_emoji: bool | None = None
+
+    for char in text:
+        is_emoji = _is_emoji(char)
+        if current_is_emoji is None:
+            current = char
+            current_is_emoji = is_emoji
+            continue
+
+        if is_emoji == current_is_emoji:
+            current += char
+            continue
+
+        runs.append((current, current_is_emoji))
+        current = char
+        current_is_emoji = is_emoji
+
+    if current:
+        runs.append((current, bool(current_is_emoji)))
+
+    return runs
+
+
+def _resolve_font_for_text(text: str, is_bold: bool, fonts: dict[str, Path]) -> str:
+    if _contains_emoji(text) and "emoji" in fonts:
+        return "emoji"
+    return "bold" if is_bold else "regular"
+
+
+def _render_font_size(size: int, is_emoji: bool) -> int:
+    if is_emoji:
+        return max(1, int(round(size * EMOJI_FONT_SCALE)))
+    return max(1, int(size))
+
+
+def _measure_text_runs(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    fonts: dict[str, Path],
+    size: int,
+    is_bold: bool,
+) -> tuple[int, int, int]:
+    total_width = 0
+    max_height = 0
+    top_offset = 0
+
+    for run_text, _ in _iter_text_runs(text):
+        if not run_text:
+            continue
+        font_key = _resolve_font_for_text(run_text, is_bold, fonts)
+        font = _load_font(fonts[font_key], _render_font_size(size, font_key == "emoji"))
+        run_width, run_height, run_top = _measure_text(draw, run_text, font)
+        total_width += run_width
+        max_height = max(max_height, run_height)
+        top_offset = min(top_offset, run_top)
+
+    return total_width, max_height, top_offset
+
+
+def _text_run_metrics(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    fonts: dict[str, Path],
+    size: int,
+    is_bold: bool,
+    is_italic: bool = False,
+) -> list[tuple[str, ImageFont.FreeTypeFont, int, int, bool]]:
+    metrics: list[tuple[str, ImageFont.FreeTypeFont, int, int, bool]] = []
+
+    for run_text, is_emoji in _iter_text_runs(text):
+        if not run_text:
+            continue
+
+        if is_emoji and "emoji" in fonts:
+            font_key = "emoji"
+        elif is_italic and "italic" in fonts:
+            font_key = "italic"
+        else:
+            font_key = "bold" if is_bold else "regular"
+
+        font_size = _render_font_size(size, font_key == "emoji")
+        font = _load_font(fonts[font_key], font_size)
+        run_width, run_height, run_top = _measure_text(draw, run_text, font)
+        metrics.append((run_text, font, run_width, run_top, font_key == "emoji"))
+
+    return metrics
+
+
+def _draw_text_runs(
+    draw: ImageDraw.ImageDraw,
+    image: Image.Image,
+    text: str,
+    position: tuple[int, int],
+    fonts: dict[str, Path],
+    size: int,
+    is_bold: bool,
+    is_italic: bool,
+    fill: tuple[int, int, int],
+    embedded_color_for_emoji: bool,
+) -> int:
+    x, y = position
+    total_width = 0
+    run_metrics = _text_run_metrics(draw, text, fonts, size, is_bold, is_italic)
+    baseline_offset = 0
+
+    for _, _, _, run_top, _ in run_metrics:
+        baseline_offset = min(baseline_offset, run_top)
+
+    for run_text, font, run_width, run_top, is_emoji_font in run_metrics:
+        draw_y = y - run_top + baseline_offset + (EMOJI_BASELINE_SHIFT if is_emoji_font else 0)
+        if is_italic and not is_emoji_font:
+            shear = 0.22
+            temp_height = _font_line_height(font) + 8
+            temp_width = run_width + int(abs(shear) * temp_height) + 8
+            temp = Image.new("RGBA", (max(1, temp_width), max(1, temp_height)), (0, 0, 0, 0))
+            temp_draw = ImageDraw.Draw(temp)
+            temp_draw.text((0, 0), run_text, font=font, fill=fill)
+            sheared = temp.transform(
+                (max(1, temp_width), max(1, temp_height)),
+                Image.AFFINE,
+                (1, -shear, 0, 0, 1, 0),
+                resample=Image.Resampling.BICUBIC,
+            )
+            image.alpha_composite(sheared, (x, draw_y))
+        else:
+            draw.text(
+                (x, draw_y),
+                run_text,
+                font=font,
+                fill=fill,
+                embedded_color=embedded_color_for_emoji and is_emoji_font,
+            )
+        x += run_width
+        total_width += run_width
+
+    return total_width
 
 
 def _hex_to_rgb(value: str) -> tuple[int, int, int]:
@@ -18,6 +172,11 @@ def _load_font(font_path: Path, size: int) -> ImageFont.FreeTypeFont:
     if not font_path.exists():
         raise FileNotFoundError(f"Font not found: {font_path}")
     return ImageFont.truetype(str(font_path), size)
+
+
+def _font_line_height(font: ImageFont.FreeTypeFont) -> int:
+    ascent, descent = font.getmetrics()
+    return ascent + descent
 
 
 def _measure_text(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont) -> tuple[int, int, int]:
@@ -93,10 +252,7 @@ def _line_width(
 
         size = int(segment.get("font_size", default_font_size))
         is_bold = bool(segment.get("bold", False))
-        font_key = "bold" if is_bold else "regular"
-        font = _load_font(fonts[font_key], size)
-
-        text_w, _, _ = _measure_text(draw, text, font)
+        text_w, _, _ = _measure_text_runs(draw, text, fonts, size, is_bold)
         total += text_w + (2 * pad_x if segment.get("highlighted", False) else 0)
 
     return total
@@ -108,9 +264,8 @@ def _tokenize_text(text: str) -> list[str]:
 
 
 def _chunk_text_to_width(
-    draw: ImageDraw.ImageDraw,
     text: str,
-    font: ImageFont.FreeTypeFont,
+    measure_width: Any,
     max_width: int,
 ) -> list[str]:
     if max_width <= 0:
@@ -129,7 +284,7 @@ def _chunk_text_to_width(
             continue
 
         candidate = current + token
-        candidate_width, _, _ = _measure_text(draw, candidate, font)
+        candidate_width = measure_width(candidate)
         if current and candidate_width > max_width:
             chunks.append(current)
             current = token.lstrip() if token.isspace() else token
@@ -142,7 +297,7 @@ def _chunk_text_to_width(
                     trial = char
                 else:
                     trial = partial + char
-                trial_width, _, _ = _measure_text(draw, trial, font)
+                trial_width = measure_width(trial)
                 if partial and trial_width > max_width:
                     chunks.append(partial)
                     partial = char
@@ -177,16 +332,15 @@ def _build_wrapped_lines(
 
         size = int(segment.get("font_size", default_font_size))
         is_bold = bool(segment.get("bold", False))
-        font_key = "bold" if is_bold else "regular"
-        font = _load_font(fonts[font_key], size)
+        measure_width = lambda candidate: _measure_text_runs(draw, candidate, fonts, size, is_bold)[0]
 
-        for chunk in _chunk_text_to_width(draw, text, font, box_width):
+        for chunk in _chunk_text_to_width(text, measure_width, box_width):
             if chunk == "\n":
                 continue
 
             chunk_segment = dict(segment)
             chunk_segment["text"] = chunk
-            chunk_width, _, _ = _measure_text(draw, chunk, font)
+            chunk_width = measure_width(chunk)
 
             if current_line and current_width + chunk_width > box_width:
                 wrapped_lines.append(current_line)
@@ -258,7 +412,7 @@ def render_dynamic_text(
         default_highlight_colors = ["#FF7A00"]
 
     if "regular" not in fonts or "bold" not in fonts:
-        raise ValueError("fonts must contain 'regular' and 'bold' keys")
+        raise ValueError("fonts must contain 'regular' and 'bold' keys (emoji key is optional)")
 
     image = image.convert("RGBA")
     draw = ImageDraw.Draw(image)
@@ -291,16 +445,52 @@ def render_dynamic_text(
             best_wrapped: list[list[dict[str, Any]]] | None = None
             best_target_size: int | None = None
 
+            def _fits_with_margin(wrapped_lines: list[list[dict[str, Any]]], candidate_line_height: int) -> bool:
+                total_height = 0
+                for wrapped_line in wrapped_lines:
+                    line_height_px = 0
+                    for segment in wrapped_line:
+                        text = segment.get("text", "")
+                        if not text:
+                            continue
+                        size = int(segment.get("font_size", candidate_line_height))
+                        is_bold = bool(segment.get("bold", False))
+                        for run_text, run_is_emoji in _iter_text_runs(text):
+                            if not run_text:
+                                continue
+                            font_key = _resolve_font_for_text(run_text, is_bold, fonts)
+                            font = _load_font(fonts[font_key], _render_font_size(size, font_key == "emoji"))
+                            line_height_px = max(line_height_px, _font_line_height(font))
+
+                    line_height_px = max(candidate_line_height, line_height_px + (pad_y * 2))
+                    total_height += line_height_px
+
+                # Keep a little headroom when the content already fills most of the box.
+                safety_margin = candidate_line_height if total_height >= int(box_height * 0.85) else 0
+                return (total_height + safety_margin) <= box_height
+
             for target_size in range(max_size, min_size - 1, -step):
                 candidate_lines = _scale_lines_font_size(lines, target_size, base_size)
                 wrapped = _build_wrapped_lines(draw, candidate_lines, fonts, target_size, box_width)
                 candidate_line_height = max(1, int(round(target_size * line_height_ratio)))
 
-                if wrapped and (len(wrapped) * candidate_line_height) <= box_height:
+                if wrapped and _fits_with_margin(wrapped, candidate_line_height):
                     best_lines = candidate_lines
                     best_wrapped = wrapped
                     best_target_size = target_size
                     break
+
+            if best_lines is None:
+                for target_size in range(min_size - 1, 0, -step):
+                    candidate_lines = _scale_lines_font_size(lines, target_size, base_size)
+                    wrapped = _build_wrapped_lines(draw, candidate_lines, fonts, target_size, box_width)
+                    candidate_line_height = max(1, int(round(target_size * line_height_ratio)))
+
+                    if wrapped and _fits_with_margin(wrapped, candidate_line_height):
+                        best_lines = candidate_lines
+                        best_wrapped = wrapped
+                        best_target_size = target_size
+                        break
 
             if best_lines is not None and best_wrapped is not None and best_target_size is not None:
                 effective_lines = best_lines
@@ -316,10 +506,26 @@ def render_dynamic_text(
 
     rendered_height = 0
     for line_segments in render_lines:
-        if text_box is not None and rendered_height + line_height > box_height:
+        line_w = _line_width(draw, line_segments, fonts, default_font_size, highlight_padding)
+        line_h = 0
+        for segment in line_segments:
+            text = segment.get("text", "")
+            if not text:
+                continue
+            size = int(segment.get("font_size", default_font_size))
+            is_bold = bool(segment.get("bold", False))
+            for run_text, run_is_emoji in _iter_text_runs(text):
+                if not run_text:
+                    continue
+                font_key = _resolve_font_for_text(run_text, is_bold, fonts)
+                font = _load_font(fonts[font_key], _render_font_size(size, font_key == "emoji"))
+                line_h = max(line_h, _font_line_height(font))
+
+        line_h = max(line_height, line_h + (pad_y * 2))
+
+        if text_box is not None and rendered_height + line_h > box_height:
             break
 
-        line_w = _line_width(draw, line_segments, fonts, default_font_size, highlight_padding)
         if text_box is not None:
             if align == "center":
                 x = start_x + (box_width - line_w) // 2
@@ -343,10 +549,7 @@ def render_dynamic_text(
             size = int(segment.get("font_size", default_font_size))
             is_bold = bool(segment.get("bold", False))
             is_highlighted = bool(segment.get("highlighted", False))
-
-            font_key = "bold" if is_bold else "regular"
-            font = _load_font(fonts[font_key], size)
-            text_w, text_h, top_offset = _measure_text(draw, text, font)
+            text_w, text_h, top_offset = _measure_text_runs(draw, text, fonts, size, is_bold)
 
             color_hex = segment.get("color", default_color)
             text_color = _hex_to_rgb(color_hex)
@@ -366,14 +569,50 @@ def render_dynamic_text(
 
                 highlight_text_hex = segment.get("highlight_text_color", default_highlight_text_color)
                 highlight_text_color = _hex_to_rgb(highlight_text_hex)
-                draw.text((x + pad_x, y - top_offset), text, font=font, fill=highlight_text_color)
+                _draw_text_runs(
+                    draw=draw,
+                    image=image,
+                    text=text,
+                    position=(x + pad_x, y - top_offset),
+                    fonts=fonts,
+                    size=size,
+                    is_bold=is_bold,
+                    is_italic=bool(segment.get("italic", False)),
+                    fill=highlight_text_color,
+                    embedded_color_for_emoji=True,
+                )
+
+                if bool(segment.get("underline", False)):
+                    ux = x + pad_x
+                    uy = y + text_h - max(1, int(size * 0.12))
+                    line_w = max(1, int(size / 14))
+                    draw.line((ux, uy, ux + text_w, uy), fill=highlight_text_color, width=line_w)
+
                 x += text_w + 2 * pad_x
             else:
-                draw.text((x, y - top_offset), text, font=font, fill=text_color)
+                _draw_text_runs(
+                    draw=draw,
+                    image=image,
+                    text=text,
+                    position=(x, y - top_offset),
+                    fonts=fonts,
+                    size=size,
+                    is_bold=is_bold,
+                    is_italic=bool(segment.get("italic", False)),
+                    fill=text_color,
+                    embedded_color_for_emoji=True,
+                )
+
+                if bool(segment.get("underline", False)):
+                    ux = x
+                    uy = y + text_h - max(1, int(size * 0.12))
+                    line_w = max(1, int(size / 14))
+                    draw.line((ux, uy, ux + text_w, uy), fill=text_color, width=line_w)
+
                 x += text_w
 
-        y += line_height
-        rendered_height += line_height
+        y += line_h
+        rendered_height += line_h
 
     return image
 
