@@ -584,8 +584,8 @@ def render_dynamic_text(
 
                 if bool(segment.get("underline", False)):
                     ux = x + pad_x
-                    uy = y + text_h - max(1, int(size * 0.12))
-                    line_w = max(1, int(size / 14))
+                    uy = y + text_h + max(1, int(size * 0.06))
+                    line_w = max(1, int(size / 16))
                     draw.line((ux, uy, ux + text_w, uy), fill=highlight_text_color, width=line_w)
 
                 x += text_w + 2 * pad_x
@@ -605,8 +605,8 @@ def render_dynamic_text(
 
                 if bool(segment.get("underline", False)):
                     ux = x
-                    uy = y + text_h - max(1, int(size * 0.12))
-                    line_w = max(1, int(size / 14))
+                    uy = y + text_h + max(1, int(size * 0.06))
+                    line_w = max(1, int(size / 16))
                     draw.line((ux, uy, ux + text_w, uy), fill=text_color, width=line_w)
 
                 x += text_w
