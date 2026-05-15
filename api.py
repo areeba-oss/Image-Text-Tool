@@ -162,6 +162,10 @@ class ReviewRequest(BaseModel):
         "#1E1E1E",
         validation_alias=AliasChoices("font_color", "review_text_font_color", "review_text_color"),
     )
+    max_words: int | None = Field(
+        60,
+        description="Optional max number of words for review text; if exceeded the text will be truncated with an ellipsis (default: 100)",
+    )
     reviewer_name_font_color: str = Field(
         "#1E1E1E",
         validation_alias=AliasChoices("reviewer_name_font_color", "reviewer_name_color"),
@@ -512,9 +516,16 @@ def render_text_review(payload: ReviewRequest) -> RenderResponse:
                 resolved_fonts["emoji"] = emoji_font_path
             
             review_line_height = payload.line_height or (payload.font_size + 12)
+            # enforce optional max_words truncation
+            text_to_render = payload.text
+            if payload.max_words is not None:
+                words = text_to_render.split()
+                if len(words) > payload.max_words:
+                    text_to_render = " ".join(words[: payload.max_words]) + "..."
+
             rendered_image = render_dynamic_text(
                 image=image,
-                lines=[_build_plain_segment(payload.text, payload.font_color, payload.font_size)],
+                lines=[_build_plain_segment(text_to_render, payload.font_color, payload.font_size)],
                 start_xy=review_text_xy,
                 text_box=(payload.text_box.model_dump() if payload.text_box else None),
                 fonts=resolved_fonts,
